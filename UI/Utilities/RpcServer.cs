@@ -373,6 +373,102 @@ namespace Mesen.Utilities
 		}
 
 		//---------------------------------------------------------------
+		// Disassembly
+		//---------------------------------------------------------------
+
+		[JsonRpcMethod("disasm.at")]
+		public object DisasmAt(uint addr, int n = 10)
+		{
+			//Token discipline: cap n at 64 instructions per call.
+			//Each row is ~60 bytes JSON-encoded → max ~4KB response.
+			const int maxRows = 64;
+			if(n <= 0 || n > maxRows) {
+				throw new LocalRpcException(
+					$"disasm.at: n must be 1..{maxRows} (got {n})")
+					{ ErrorCode = -32602 };
+			}
+
+			CodeLineData[] lines = DebugApi.GetDisassemblyOutput(CpuType.Snes, addr, (uint)n);
+
+			//Filter out non-instruction rows (labels, comments, block markers,
+			//empty lines) — they pollute the response and waste tokens. Keep
+			//only rows with a valid address and non-empty mnemonic text.
+			var result = lines
+				.Where(l => l.HasAddress && !string.IsNullOrEmpty(l.Text))
+				.Select(l => new {
+					Addr = (uint)l.Address,
+					Bytes = Convert.ToHexString(l.ByteCode, 0, l.OpSize),
+					Text = l.Text.Trim(),
+					Size = (int)l.OpSize,
+				})
+				.ToArray();
+			return result;
+		}
+
+		//---------------------------------------------------------------
+		// Memory search
+		//---------------------------------------------------------------
+
+		[JsonRpcMethod("mem.search")]
+		public object MemSearch(string space, string patternHex,
+			uint startAddr = 0, uint length = 0, int maxResults = 10)
+		{
+			//Search for a byte sequence in the given memory space. patternHex is
+			//a hex string ("AABB", "DEADBEEF" — no separators, no 0x prefix).
+			//startAddr/length default to the full memory space for that type.
+			//maxResults caps how many matches we report (token discipline).
+			const int maxResultsCap = 100;
+			if(maxResults <= 0 || maxResults > maxResultsCap) {
+				throw new LocalRpcException(
+					$"mem.search: maxResults must be 1..{maxResultsCap} (got {maxResults})")
+					{ ErrorCode = -32602 };
+			}
+
+			byte[] pattern;
+			try {
+				pattern = Convert.FromHexString(patternHex);
+			} catch {
+				throw new LocalRpcException(
+					$"mem.search: invalid hex pattern '{patternHex}' (must be even-length hex, no separators)")
+					{ ErrorCode = -32602 };
+			}
+			if(pattern.Length == 0 || pattern.Length > 64) {
+				throw new LocalRpcException(
+					$"mem.search: pattern length must be 1..64 bytes (got {pattern.Length})")
+					{ ErrorCode = -32602 };
+			}
+
+			MemoryType type = ParseMemorySpace(space);
+			uint memSize = (uint)DebugApi.GetMemorySize(type);
+			if(length == 0) {
+				length = memSize - startAddr;
+			}
+			if(startAddr >= memSize || startAddr + length > memSize) {
+				throw new LocalRpcException(
+					$"mem.search: range ${startAddr:X}..${startAddr+length:X} exceeds memory size ${memSize:X}")
+					{ ErrorCode = -32602 };
+			}
+
+			byte[] buf = DebugApi.GetMemoryValues(type, startAddr, startAddr + length - 1);
+
+			//Naive linear scan — fine for typical SNES address spaces (max 16MB ROM).
+			//Bails on first `maxResults` matches to stay token-bounded.
+			List<uint> hits = new();
+			int last = buf.Length - pattern.Length;
+			for(int i = 0; i <= last; i++) {
+				bool match = true;
+				for(int j = 0; j < pattern.Length; j++) {
+					if(buf[i + j] != pattern[j]) { match = false; break; }
+				}
+				if(match) {
+					hits.Add(startAddr + (uint)i);
+					if(hits.Count >= maxResults) break;
+				}
+			}
+			return hits.ToArray();
+		}
+
+		//---------------------------------------------------------------
 		// Snapshots (state save/restore — file-backed for unbounded IDs)
 		//---------------------------------------------------------------
 
