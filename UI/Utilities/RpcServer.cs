@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -244,7 +245,16 @@ namespace Mesen.Utilities
 			_notificationListener = new NotificationListener();
 			_notificationListener.OnNotification += (e) => {
 				if(e.NotificationType == ConsoleNotificationType.CodeBreak) {
-					_codeBreakSignal.Set();
+					//CodeBreak fires for all break sources: real breakpoint hits,
+					//but also PpuStep (e.g. from RunSingleFrame / Step(PpuFrame)),
+					//Pause (from EmuApi.Pause which Step()s 1 cycle with Pause source),
+					//and Step/StepOver/etc. We only want to wake cpu.run_until when
+					//the source is a real Breakpoint hit. The discriminator below
+					//is what makes cpu.run_until's wait-for-BP semantics correct.
+					BreakEvent evt = Marshal.PtrToStructure<BreakEvent>(e.Parameter);
+					if(evt.Source == BreakSource.Breakpoint) {
+						_codeBreakSignal.Set();
+					}
 				}
 			};
 
@@ -278,16 +288,18 @@ namespace Mesen.Utilities
 					{ ErrorCode = -32602 };
 			}
 
-			//RunSingleFrame schedules a pause AFTER the next frame, which only
-			//advances state when the emulator is actually running. So we Resume
-			//first, request a frame advance, wait for the resulting pause, and
-			//repeat — that loop advances exactly `n` frames deterministically.
+			//Earlier implementations used EmulatorShortcut.RunSingleFrame, but
+			//ShortcutKeyHandler latches it into auto-repeat mode (20fps press-and-hold
+			//emulation) without a paired ReleaseShortcut, which then keeps re-installing
+			//PpuStep break requests every 50ms — corrupting any subsequent free-run
+			//(e.g. cpu.run_until). DebugApi.Step(PpuFrame) advances exactly one frame
+			//via the debugger Step path, no auto-repeat, no latched shortcut state.
 			for(uint i = 0; i < n; i++) {
-				EmuApi.Resume();
-				EmuApi.ExecuteShortcut(new ExecuteShortcutParams { Shortcut = EmulatorShortcut.RunSingleFrame });
+				DebugApi.Step(CpuType.Snes, 1, StepType.PpuFrame);
 
-				//Wait for the pause to take effect. Frame at 60Hz = ~16.7ms; give
-				//200ms before treating it as a hang.
+				//Wait for the resulting pause. Frame at 60Hz = ~16.7ms; give 200ms
+				//before treating it as a hang. EmuApi.IsPaused() routes through
+				//Debugger::IsPaused which reflects _waitForBreakResume.
 				int waitedMs = 0;
 				while(!EmuApi.IsPaused() && waitedMs < 200) {
 					Thread.Sleep(1);
@@ -397,8 +409,17 @@ namespace Mesen.Utilities
 		{
 			//Composite: install a temporary exec breakpoint at `addr`, resume,
 			//wait for the CodeBreak notification to fire, then return state.
-			//CodeBreak is the authoritative "BP hit" signal from the C++
-			//debugger; EmuApi.IsPaused() does not reflect debugger pause.
+			//
+			//Two pause levels matter here:
+			//  1. EmuApi.IsPaused()        — public pause (set by Pause/Resume).
+			//                                If true, the emu thread doesn't run.
+			//  2. Debugger::_waitForBreakResume — internal break (set by SleepUntilResume
+			//                                on BP hit). The emu thread spins in a
+			//                                10ms-sleep loop until cleared.
+			//
+			//To actually run, BOTH must be cleared: EmuApi.Resume() drives (1),
+			//DebugApi.ResumeExecution() drives (2). The CodeBreak notification is
+			//then the authoritative "BP hit" signal from the C++ debugger.
 			if(!_debuggerInitialized) {
 				throw new LocalRpcException(
 					"cpu.run_until: debugger not initialized (load a ROM first)")
@@ -409,8 +430,10 @@ namespace Mesen.Utilities
 			int bpId = BpAdd(addr, "exec");
 			try {
 				DebugApi.ResumeExecution();
+				EmuApi.Resume();
 				bool hit = _codeBreakSignal.Wait(timeoutMs);
 				if(!hit) {
+					EmuApi.Pause();
 					throw new LocalRpcException(
 						$"cpu.run_until: timeout after {timeoutMs}ms without CodeBreak at addr ${addr:X4}")
 						{ ErrorCode = -32603 };
