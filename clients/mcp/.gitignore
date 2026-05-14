@@ -1,0 +1,12 @@
+node_modules/
+dist/
+package-lock.json
+*.tgz
+.DS_Store
+
+# The parent .gitignore ignores [Bb]in/ for Visual Studio output;
+# unignore our launcher path explicitly. The script is the entry point
+# wired into package.json's "bin" field — losing it would break
+# `claude mcp add mesen2 -- mesen2-mcp`.
+!bin/
+!bin/mesen2-mcp
