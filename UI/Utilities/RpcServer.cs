@@ -127,6 +127,78 @@ namespace Mesen.Utilities
 			return state.PC;
 		}
 
+		[JsonRpcMethod("cpu.register")]
+		public uint CpuRegister(string name)
+		{
+			SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			return name.ToUpperInvariant() switch {
+				"A" => s.A,
+				"X" => s.X,
+				"Y" => s.Y,
+				"SP" or "S" => s.SP,
+				"D" or "DP" => s.D,
+				"PC" => s.PC,
+				"K" or "PB" or "PBR" => s.K,
+				"DBR" or "DB" => s.DBR,
+				"P" or "PS" or "FLAGS" => (byte)s.PS,
+				_ => throw new LocalRpcException($"unknown register '{name}' (use A/X/Y/SP/D/PC/K/DBR/P)")
+					{ ErrorCode = -32602 }
+			};
+		}
+
+		[JsonRpcMethod("cpu.state")]
+		public object CpuState()
+		{
+			//Compact return: ~80 bytes JSON encoded. All 65816 registers in
+			//one shot, but no extra metadata (no descriptions, no flag parse).
+			SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			return new {
+				A = s.A,
+				X = s.X,
+				Y = s.Y,
+				SP = s.SP,
+				D = s.D,
+				PC = s.PC,
+				K = s.K,
+				DBR = s.DBR,
+				P = (byte)s.PS,
+				EmuMode = s.EmulationMode,
+				Cycle = s.CycleCount,
+			};
+		}
+
+		[JsonRpcMethod("mem.read_word")]
+		public uint MemReadWord(string space, uint addr)
+		{
+			MemoryType type = ParseMemorySpace(space);
+			byte[] buf = DebugApi.GetMemoryValues(type, addr, addr + 1);
+			return (uint)(buf[0] | (buf[1] << 8));
+		}
+
+		[JsonRpcMethod("mem.read_dword")]
+		public uint MemReadDword(string space, uint addr)
+		{
+			MemoryType type = ParseMemorySpace(space);
+			byte[] buf = DebugApi.GetMemoryValues(type, addr, addr + 3);
+			return (uint)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
+		}
+
+		[JsonRpcMethod("mem.read_range")]
+		public string MemReadRange(string space, uint addr, uint n)
+		{
+			const uint maxPerCall = 256;
+			if(n == 0 || n > maxPerCall) {
+				throw new LocalRpcException(
+					$"mem.read_range: n must be 1..{maxPerCall} (got {n})")
+					{ ErrorCode = -32602 };
+			}
+			MemoryType type = ParseMemorySpace(space);
+			byte[] buf = DebugApi.GetMemoryValues(type, addr, addr + n - 1);
+			//Compact hex string (no separators, no 0x prefix) — 2 chars per
+			//byte. Caller decodes with Buffer.from(s, 'hex') / equivalent.
+			return Convert.ToHexString(buf);
+		}
+
 		[JsonRpcMethod("emu.load_rom")]
 		public bool EmuLoadRom(string path)
 		{
