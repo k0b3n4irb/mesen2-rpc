@@ -1,10 +1,13 @@
 using Mesen.Config;
 using Mesen.Config.Shortcuts;
+using Mesen.Debugger;
 using Mesen.Debugger.Utilities;
 using Mesen.Interop;
 using StreamJsonRpc;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -54,6 +57,8 @@ namespace Mesen.Utilities
 
 			ConfigApi.SetEmulationFlag(EmulationFlags.ConsoleMode, true);
 
+			RpcMethods methods = new();
+
 			if(commandLineHelper.FilesToLoad.Count == 1) {
 				if(!EmuApi.LoadRom(commandLineHelper.FilesToLoad[0], string.Empty)) {
 					Console.Error.WriteLine($"rpc-server: failed to load ROM {commandLineHelper.FilesToLoad[0]}");
@@ -61,6 +66,7 @@ namespace Mesen.Utilities
 					return -1;
 				}
 				DebugWorkspaceManager.Load();
+				methods.EnsureDebuggerInitialized();
 			}
 
 			TcpListener listener = new(IPAddress.Loopback, port);
@@ -80,7 +86,6 @@ namespace Mesen.Utilities
 				listener.Stop();
 			};
 
-			RpcMethods methods = new();
 			try {
 				while(!cts.IsCancellationRequested) {
 					TcpClient client = listener.AcceptTcpClient();
@@ -92,6 +97,9 @@ namespace Mesen.Utilities
 				//Listener was disposed on Ctrl-C — also clean
 			}
 
+			if(methods.IsDebuggerInitialized) {
+				DebugApi.ReleaseDebugger();
+			}
 			EmuApi.Stop();
 			EmuApi.Release();
 			return 0;
@@ -205,8 +213,22 @@ namespace Mesen.Utilities
 			bool ok = EmuApi.LoadRom(path, string.Empty);
 			if(ok) {
 				DebugWorkspaceManager.Load();
+				EnsureDebuggerInitialized();
 			}
 			return ok;
+		}
+
+		//Called once per ROM load to wire up the debugger machinery
+		//(SetBreakpoints / Step / memory callbacks). The C++ side crashes
+		//if InitializeDebugger fires without a loaded ROM, so we gate it.
+		private bool _debuggerInitialized = false;
+		internal bool IsDebuggerInitialized => _debuggerInitialized;
+		internal void EnsureDebuggerInitialized()
+		{
+			if(!_debuggerInitialized) {
+				DebugApi.InitializeDebugger();
+				_debuggerInitialized = true;
+			}
 		}
 
 		[JsonRpcMethod("emu.reset")]
@@ -257,6 +279,119 @@ namespace Mesen.Utilities
 			MemoryType type = ParseMemorySpace(space);
 			byte[] buf = DebugApi.GetMemoryValues(type, addr, addr);
 			return buf[0];
+		}
+
+		//---------------------------------------------------------------
+		// Breakpoints
+		//---------------------------------------------------------------
+
+		private readonly Dictionary<int, InteropBreakpoint> _breakpoints = new();
+		private int _nextBpId = 1;
+		private readonly object _bpLock = new();
+
+		[JsonRpcMethod("bp.add")]
+		public int BpAdd(uint addr, string? type = "exec")
+		{
+			BreakpointTypeFlags bpType = (type ?? "exec").ToLowerInvariant() switch {
+				"exec" or "execute" or "x" => BreakpointTypeFlags.Execute,
+				"read" or "r" => BreakpointTypeFlags.Read,
+				"write" or "w" => BreakpointTypeFlags.Write,
+				_ => throw new LocalRpcException(
+					$"bp.add: unknown type '{type}' (use exec/read/write)")
+					{ ErrorCode = -32602 }
+			};
+
+			int id;
+			lock(_bpLock) {
+				id = _nextBpId++;
+				_breakpoints[id] = new InteropBreakpoint {
+					Id = id,
+					CpuType = CpuType.Snes,
+					MemoryType = MemoryType.SnesMemory,
+					Type = bpType,
+					StartAddress = (int)addr,
+					EndAddress = (int)addr,
+					Enabled = true,
+					MarkEvent = false,
+					IgnoreDummyOperations = false,
+					Condition = new byte[1000],
+				};
+				SyncBreakpoints();
+			}
+			return id;
+		}
+
+		[JsonRpcMethod("bp.clear")]
+		public bool BpClear(int id)
+		{
+			lock(_bpLock) {
+				if(_breakpoints.Remove(id)) {
+					SyncBreakpoints();
+					return true;
+				}
+				return false;
+			}
+		}
+
+		[JsonRpcMethod("bp.clear_all")]
+		public int BpClearAll()
+		{
+			lock(_bpLock) {
+				int n = _breakpoints.Count;
+				_breakpoints.Clear();
+				SyncBreakpoints();
+				return n;
+			}
+		}
+
+		[JsonRpcMethod("bp.list")]
+		public object BpList()
+		{
+			lock(_bpLock) {
+				return _breakpoints.Select(kv => new {
+					Id = kv.Key,
+					Addr = (uint)kv.Value.StartAddress,
+					Type = kv.Value.Type.ToString().ToLowerInvariant(),
+				}).ToArray();
+			}
+		}
+
+		private void SyncBreakpoints()
+		{
+			//Caller must hold _bpLock.
+			InteropBreakpoint[] bps = _breakpoints.Values.ToArray();
+			DebugApi.SetBreakpoints(bps, (uint)bps.Length);
+		}
+
+		[JsonRpcMethod("cpu.run_until")]
+		public object CpuRunUntil(uint addr, int timeoutMs = 5000)
+		{
+			//Composite: install a temporary exec breakpoint at `addr`, resume
+			//the emulator, wait for it to pause (= breakpoint hit OR timeout),
+			//remove the breakpoint, and return the post-pause state. Caller
+			//gets either {PC: addr, Hit: true} or a timeout error.
+			int bpId = BpAdd(addr, "exec");
+			try {
+				EmuApi.Resume();
+				int waited = 0;
+				while(!EmuApi.IsPaused() && waited < timeoutMs) {
+					Thread.Sleep(1);
+					waited++;
+				}
+				if(!EmuApi.IsPaused()) {
+					throw new LocalRpcException(
+						$"cpu.run_until: timeout after {timeoutMs}ms without hitting addr ${addr:X4}")
+						{ ErrorCode = -32603 };
+				}
+				SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+				return new {
+					PC = s.PC,
+					Hit = s.PC == addr,
+					WaitedMs = waited,
+				};
+			} finally {
+				BpClear(bpId);
+			}
 		}
 
 		//---------------------------------------------------------------
