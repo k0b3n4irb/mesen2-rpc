@@ -322,6 +322,74 @@ namespace Mesen.Utilities
 			return buf[0];
 		}
 
+		[JsonRpcMethod("emu.is_paused")]
+		public bool EmuIsPaused()
+		{
+			return EmuApi.IsPaused();
+		}
+
+		//---------------------------------------------------------------
+		// PPU
+		//---------------------------------------------------------------
+
+		[JsonRpcMethod("ppu.register")]
+		public object PpuRegister(string name)
+		{
+			//Token-discipline: return ONE value per call, not the whole struct.
+			//Field names mirror Mesen2's SnesPpuState (case-insensitive,
+			//common short aliases accepted).
+			SnesPpuState p = DebugApi.GetPpuState<SnesPpuState>(CpuType.Snes);
+			return name.ToLowerInvariant() switch {
+				"bgmode" or "bg_mode" => (object)p.BgMode,
+				"scanline" => p.Scanline,
+				"cycle" or "h_cycle" => p.Cycle,
+				"hclock" or "h_clock" => p.HClock,
+				"frame" or "frame_count" => p.FrameCount,
+				"forcedblank" or "forced_blank" => p.ForcedBlank,
+				"brightness" or "screen_brightness" => p.ScreenBrightness,
+				"vram_address" or "vram_addr" => p.VramAddress,
+				"vram_inc" or "vram_increment" => p.VramIncrementValue,
+				"cgram_address" or "cgram_addr" => p.CgramAddress,
+				"oam_address" or "oam_addr" => p.OamRamAddress,
+				"main_screen" or "main_screen_layers" => p.MainScreenLayers,
+				"sub_screen" or "sub_screen_layers" => p.SubScreenLayers,
+				"mosaic_size" => p.MosaicSize,
+				"mosaic_enabled" => p.MosaicEnabled,
+				"hi_res" or "hires" => p.HiResMode,
+				"interlace" or "screen_interlace" => p.ScreenInterlace,
+				"overscan" or "overscan_mode" => p.OverscanMode,
+				_ => throw new LocalRpcException(
+					$"unknown PPU register '{name}' (try bg_mode / scanline / vram_address / cgram_address / forced_blank / brightness / main_screen / sub_screen)")
+					{ ErrorCode = -32602 }
+			};
+		}
+
+		[JsonRpcMethod("ppu.state")]
+		public object PpuState()
+		{
+			//Compact dump of the diagnostically-useful PPU state fields.
+			//~200 bytes JSON-encoded. Mirrors what a human reading Mesen2's
+			//PPU Viewer would care about; excludes per-layer arrays and
+			//windowing config (use ppu.layer / ppu.window when those land).
+			SnesPpuState p = DebugApi.GetPpuState<SnesPpuState>(CpuType.Snes);
+			return new {
+				Scanline = p.Scanline,
+				HClock = p.HClock,
+				Frame = p.FrameCount,
+				BgMode = p.BgMode,
+				ForcedBlank = p.ForcedBlank,
+				Brightness = p.ScreenBrightness,
+				VramAddr = p.VramAddress,
+				CgramAddr = p.CgramAddress,
+				OamAddr = p.OamRamAddress,
+				MainScreen = p.MainScreenLayers,
+				SubScreen = p.SubScreenLayers,
+				HiRes = p.HiResMode,
+				Interlace = p.ScreenInterlace,
+				Overscan = p.OverscanMode,
+			};
+		}
+
 		//---------------------------------------------------------------
 		// Breakpoints
 		//---------------------------------------------------------------
