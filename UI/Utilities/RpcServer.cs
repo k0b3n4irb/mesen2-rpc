@@ -229,14 +229,18 @@ namespace Mesen.Utilities
 			if(_debuggerInitialized) {
 				return;
 			}
-			DebugApi.InitializeDebugger();
+			//Note: ConsoleMode flag causes Emulator.cpp:495 to call
+			//InitDebugger() automatically during LoadRom. We don't call
+			//DebugApi.InitializeDebugger() here — that would be a
+			//redundant init that has historically been the source of
+			//SIGSEGV when called pre-ROM.
 
 			//Register a notification listener so we can detect when a
 			//breakpoint pauses execution. EmuApi.IsPaused() does NOT reflect
 			//the debugger's internal stop state (Debugger::SleepUntilResume
 			//in C++ blocks the emu thread but doesn't toggle the "paused"
 			//flag visible via the public API). The CodeBreak notification is
-			//the canonical hook.
+			//the canonical hook, fired from the C++ debugger when a BP hits.
 			_notificationListener = new NotificationListener();
 			_notificationListener.OnNotification += (e) => {
 				if(e.NotificationType == ConsoleNotificationType.CodeBreak) {
@@ -251,10 +255,9 @@ namespace Mesen.Utilities
 		{
 			_notificationListener?.Dispose();
 			_notificationListener = null;
-			if(_debuggerInitialized) {
-				DebugApi.ReleaseDebugger();
-				_debuggerInitialized = false;
-			}
+			//ConsoleMode init pairs with ReleaseDebugger on emu Release —
+			//don't call ReleaseDebugger explicitly to avoid double-release.
+			_debuggerInitialized = false;
 		}
 
 		[JsonRpcMethod("emu.reset")]
