@@ -268,6 +268,14 @@ namespace Mesen.Utilities
 			//ConsoleMode init pairs with ReleaseDebugger on emu Release —
 			//don't call ReleaseDebugger explicitly to avoid double-release.
 			_debuggerInitialized = false;
+
+			//Best-effort cleanup of snapshot files. If the server crashes
+			//these may remain in /tmp; they're prefixed with mesen-rpc-snap
+			//and tagged with PID so they're easy to grep + sweep later.
+			if(_snapDir != null) {
+				try { Directory.Delete(_snapDir, recursive: true); } catch { /* ignore */ }
+				_snapDir = null;
+			}
 		}
 
 		[JsonRpcMethod("emu.reset")]
@@ -362,6 +370,77 @@ namespace Mesen.Utilities
 					$"unknown PPU register '{name}' (try bg_mode / scanline / vram_address / cgram_address / forced_blank / brightness / main_screen / sub_screen)")
 					{ ErrorCode = -32602 }
 			};
+		}
+
+		//---------------------------------------------------------------
+		// Snapshots (state save/restore — file-backed for unbounded IDs)
+		//---------------------------------------------------------------
+
+		private readonly Dictionary<int, string> _snapshots = new();
+		private int _nextSnapId = 1;
+		private readonly object _snapLock = new();
+		private string? _snapDir;
+
+		private string EnsureSnapDir()
+		{
+			//Lazily allocate a per-server-instance temp dir for snapshot
+			//files. Cleanup happens in ShutdownDebugger; clients should not
+			//rely on snapshots surviving server restart.
+			if(_snapDir == null) {
+				_snapDir = Path.Combine(Path.GetTempPath(),
+					$"mesen-rpc-snap-{Environment.ProcessId}");
+				Directory.CreateDirectory(_snapDir);
+			}
+			return _snapDir;
+		}
+
+		[JsonRpcMethod("snap.save")]
+		public int SnapSave()
+		{
+			int id;
+			lock(_snapLock) {
+				id = _nextSnapId++;
+				string path = Path.Combine(EnsureSnapDir(), $"{id}.mss");
+				EmuApi.SaveStateFile(path);
+				_snapshots[id] = path;
+			}
+			return id;
+		}
+
+		[JsonRpcMethod("snap.restore")]
+		public bool SnapRestore(int id)
+		{
+			lock(_snapLock) {
+				if(!_snapshots.TryGetValue(id, out string? path)) {
+					return false;
+				}
+				EmuApi.LoadStateFile(path);
+				return true;
+			}
+		}
+
+		[JsonRpcMethod("snap.list")]
+		public object SnapList()
+		{
+			lock(_snapLock) {
+				return _snapshots.Keys.OrderBy(k => k).ToArray();
+			}
+		}
+
+		[JsonRpcMethod("snap.discard")]
+		public bool SnapDiscard(int id)
+		{
+			//Explicit cleanup. Not in the original 30-tool plan but cheap
+			//to add and very useful — without it, a long session leaks
+			//state files in /tmp.
+			lock(_snapLock) {
+				if(!_snapshots.TryGetValue(id, out string? path)) {
+					return false;
+				}
+				try { File.Delete(path); } catch { /* ignore */ }
+				_snapshots.Remove(id);
+				return true;
+			}
 		}
 
 		[JsonRpcMethod("ppu.state")]
