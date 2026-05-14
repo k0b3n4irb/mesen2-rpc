@@ -1,4 +1,5 @@
 using Mesen.Config;
+using Mesen.Config.Shortcuts;
 using Mesen.Debugger.Utilities;
 using Mesen.Interop;
 using StreamJsonRpc;
@@ -124,6 +125,88 @@ namespace Mesen.Utilities
 		{
 			SnesCpuState state = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
 			return state.PC;
+		}
+
+		[JsonRpcMethod("emu.load_rom")]
+		public bool EmuLoadRom(string path)
+		{
+			bool ok = EmuApi.LoadRom(path, string.Empty);
+			if(ok) {
+				DebugWorkspaceManager.Load();
+			}
+			return ok;
+		}
+
+		[JsonRpcMethod("emu.reset")]
+		public bool EmuReset()
+		{
+			EmuApi.ExecuteShortcut(new ExecuteShortcutParams { Shortcut = EmulatorShortcut.Reset });
+			return true;
+		}
+
+		[JsonRpcMethod("emu.run_frames")]
+		public uint EmuRunFrames(uint n)
+		{
+			//Default: cap at 600 frames (~10s at 60Hz) per call to keep latency
+			//bounded. Caller paginates by repeated calls if they need more.
+			const uint maxPerCall = 600;
+			if(n > maxPerCall) {
+				throw new LocalRpcException($"n={n} exceeds max {maxPerCall}; call multiple times")
+					{ ErrorCode = -32602 };
+			}
+
+			//RunSingleFrame schedules a pause AFTER the next frame, which only
+			//advances state when the emulator is actually running. So we Resume
+			//first, request a frame advance, wait for the resulting pause, and
+			//repeat — that loop advances exactly `n` frames deterministically.
+			for(uint i = 0; i < n; i++) {
+				EmuApi.Resume();
+				EmuApi.ExecuteShortcut(new ExecuteShortcutParams { Shortcut = EmulatorShortcut.RunSingleFrame });
+
+				//Wait for the pause to take effect. Frame at 60Hz = ~16.7ms; give
+				//200ms before treating it as a hang.
+				int waitedMs = 0;
+				while(!EmuApi.IsPaused() && waitedMs < 200) {
+					Thread.Sleep(1);
+					waitedMs++;
+				}
+				if(!EmuApi.IsPaused()) {
+					throw new LocalRpcException(
+						$"emu.run_frames: timeout waiting for frame {i+1}/{n} to complete")
+						{ ErrorCode = -32603 };
+				}
+			}
+			return n;
+		}
+
+		[JsonRpcMethod("mem.read_byte")]
+		public byte MemReadByte(string space, uint addr)
+		{
+			MemoryType type = ParseMemorySpace(space);
+			byte[] buf = DebugApi.GetMemoryValues(type, addr, addr);
+			return buf[0];
+		}
+
+		//---------------------------------------------------------------
+		// Helpers
+		//---------------------------------------------------------------
+
+		private static MemoryType ParseMemorySpace(string space)
+		{
+			//Map short user-facing names to Mesen2 MemoryType enum values.
+			//Token discipline: accept short names so clients don't have to
+			//know Mesen2's internal enum naming.
+			return space.ToLowerInvariant() switch {
+				"cpu" or "snes" => MemoryType.SnesMemory,
+				"wram" => MemoryType.SnesWorkRam,
+				"vram" => MemoryType.SnesVideoRam,
+				"cgram" => MemoryType.SnesCgRam,
+				"oam" => MemoryType.SnesSpriteRam,
+				"sram" => MemoryType.SnesSaveRam,
+				"rom" or "prgrom" => MemoryType.SnesPrgRom,
+				_ => throw new LocalRpcException($"unknown memory space '{space}'")
+					{ ErrorCode = -32602 }
+			};
 		}
 	}
 }
