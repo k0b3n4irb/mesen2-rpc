@@ -97,9 +97,7 @@ namespace Mesen.Utilities
 				//Listener was disposed on Ctrl-C — also clean
 			}
 
-			if(methods.IsDebuggerInitialized) {
-				DebugApi.ReleaseDebugger();
-			}
+			methods.ShutdownDebugger();
 			EmuApi.Stop();
 			EmuApi.Release();
 			return 0;
@@ -222,12 +220,40 @@ namespace Mesen.Utilities
 		//(SetBreakpoints / Step / memory callbacks). The C++ side crashes
 		//if InitializeDebugger fires without a loaded ROM, so we gate it.
 		private bool _debuggerInitialized = false;
+		private NotificationListener? _notificationListener;
+		private readonly ManualResetEventSlim _codeBreakSignal = new(false);
+
 		internal bool IsDebuggerInitialized => _debuggerInitialized;
 		internal void EnsureDebuggerInitialized()
 		{
-			if(!_debuggerInitialized) {
-				DebugApi.InitializeDebugger();
-				_debuggerInitialized = true;
+			if(_debuggerInitialized) {
+				return;
+			}
+			DebugApi.InitializeDebugger();
+
+			//Register a notification listener so we can detect when a
+			//breakpoint pauses execution. EmuApi.IsPaused() does NOT reflect
+			//the debugger's internal stop state (Debugger::SleepUntilResume
+			//in C++ blocks the emu thread but doesn't toggle the "paused"
+			//flag visible via the public API). The CodeBreak notification is
+			//the canonical hook.
+			_notificationListener = new NotificationListener();
+			_notificationListener.OnNotification += (e) => {
+				if(e.NotificationType == ConsoleNotificationType.CodeBreak) {
+					_codeBreakSignal.Set();
+				}
+			};
+
+			_debuggerInitialized = true;
+		}
+
+		internal void ShutdownDebugger()
+		{
+			_notificationListener?.Dispose();
+			_notificationListener = null;
+			if(_debuggerInitialized) {
+				DebugApi.ReleaseDebugger();
+				_debuggerInitialized = false;
 			}
 		}
 
@@ -366,28 +392,30 @@ namespace Mesen.Utilities
 		[JsonRpcMethod("cpu.run_until")]
 		public object CpuRunUntil(uint addr, int timeoutMs = 5000)
 		{
-			//Composite: install a temporary exec breakpoint at `addr`, resume
-			//the emulator, wait for it to pause (= breakpoint hit OR timeout),
-			//remove the breakpoint, and return the post-pause state. Caller
-			//gets either {PC: addr, Hit: true} or a timeout error.
+			//Composite: install a temporary exec breakpoint at `addr`, resume,
+			//wait for the CodeBreak notification to fire, then return state.
+			//CodeBreak is the authoritative "BP hit" signal from the C++
+			//debugger; EmuApi.IsPaused() does not reflect debugger pause.
+			if(!_debuggerInitialized) {
+				throw new LocalRpcException(
+					"cpu.run_until: debugger not initialized (load a ROM first)")
+					{ ErrorCode = -32603 };
+			}
+
+			_codeBreakSignal.Reset();
 			int bpId = BpAdd(addr, "exec");
 			try {
-				EmuApi.Resume();
-				int waited = 0;
-				while(!EmuApi.IsPaused() && waited < timeoutMs) {
-					Thread.Sleep(1);
-					waited++;
-				}
-				if(!EmuApi.IsPaused()) {
+				DebugApi.ResumeExecution();
+				bool hit = _codeBreakSignal.Wait(timeoutMs);
+				if(!hit) {
 					throw new LocalRpcException(
-						$"cpu.run_until: timeout after {timeoutMs}ms without hitting addr ${addr:X4}")
+						$"cpu.run_until: timeout after {timeoutMs}ms without CodeBreak at addr ${addr:X4}")
 						{ ErrorCode = -32603 };
 				}
 				SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
 				return new {
 					PC = s.PC,
 					Hit = s.PC == addr,
-					WaitedMs = waited,
 				};
 			} finally {
 				BpClear(bpId);
