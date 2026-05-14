@@ -404,6 +404,101 @@ namespace Mesen.Utilities
 			DebugApi.SetBreakpoints(bps, (uint)bps.Length);
 		}
 
+		[JsonRpcMethod("cpu.step")]
+		public uint CpuStep()
+		{
+			//Single instruction step. Pairs with cpu.state to inspect the
+			//resulting register file. Block on the resulting pause so the
+			//caller knows the step is complete before the next RPC fires.
+			if(!_debuggerInitialized) {
+				throw new LocalRpcException(
+					"cpu.step: debugger not initialized (load a ROM first)")
+					{ ErrorCode = -32603 };
+			}
+
+			_codeBreakSignal.Reset();
+			DebugApi.Step(CpuType.Snes, 1, StepType.Step);
+
+			//A single Step fires CodeBreak with source=CpuStep (not Breakpoint),
+			//so we can't reuse the _codeBreakSignal discriminator. Poll
+			//EmuApi.IsPaused() which routes through Debugger::IsPaused →
+			//_waitForBreakResume, which is set by SleepUntilResume on the
+			//step's pause.
+			int waitedMs = 0;
+			while(!EmuApi.IsPaused() && waitedMs < 100) {
+				Thread.Sleep(1);
+				waitedMs++;
+			}
+			SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			return s.PC;
+		}
+
+		[JsonRpcMethod("cpu.step_n")]
+		public uint CpuStepN(int n)
+		{
+			//Bulk step. Cap at 10000 to keep response time bounded; caller
+			//paginates if they need more. Each step is one 65816 instruction.
+			const int maxPerCall = 10000;
+			if(n <= 0 || n > maxPerCall) {
+				throw new LocalRpcException(
+					$"cpu.step_n: n must be 1..{maxPerCall} (got {n})")
+					{ ErrorCode = -32602 };
+			}
+			if(!_debuggerInitialized) {
+				throw new LocalRpcException(
+					"cpu.step_n: debugger not initialized (load a ROM first)")
+					{ ErrorCode = -32603 };
+			}
+
+			//Native Debugger::Step supports a count directly — far cheaper than
+			//N round trips. SleepUntilResume fires once when StepCount reaches 0.
+			DebugApi.Step(CpuType.Snes, n, StepType.Step);
+			int waitedMs = 0;
+			int maxWaitMs = Math.Max(200, n * 2);
+			while(!EmuApi.IsPaused() && waitedMs < maxWaitMs) {
+				Thread.Sleep(1);
+				waitedMs++;
+			}
+			SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			return s.PC;
+		}
+
+		[JsonRpcMethod("bp.wait_for_hit")]
+		public object BpWaitForHit(int timeoutMs = 10000)
+		{
+			//Assumes BPs are already installed via bp.add. Resumes the emu
+			//(both pause levels) and blocks until a Breakpoint-source CodeBreak
+			//arrives. Returns {pc, hit:true} on success, or throws on timeout
+			//with the most recent PC for diagnostic value.
+			//
+			//Distinction from cpu.run_until: this is for *pre-installed*
+			//breakpoints. cpu.run_until is composite (install + wait + clear).
+			//Use bp.wait_for_hit when you have multiple BPs and want to know
+			//which one fired (combine with cpu.state to read PC).
+			if(!_debuggerInitialized) {
+				throw new LocalRpcException(
+					"bp.wait_for_hit: debugger not initialized (load a ROM first)")
+					{ ErrorCode = -32603 };
+			}
+
+			_codeBreakSignal.Reset();
+			DebugApi.ResumeExecution();
+			EmuApi.Resume();
+			bool hit = _codeBreakSignal.Wait(timeoutMs);
+			if(!hit) {
+				EmuApi.Pause();
+				SnesCpuState s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+				throw new LocalRpcException(
+					$"bp.wait_for_hit: timeout after {timeoutMs}ms; PC=${s.PC:X4}")
+					{ ErrorCode = -32603 };
+			}
+			SnesCpuState s2 = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			return new {
+				PC = s2.PC,
+				Hit = true,
+			};
+		}
+
 		[JsonRpcMethod("cpu.run_until")]
 		public object CpuRunUntil(uint addr, int timeoutMs = 5000)
 		{
