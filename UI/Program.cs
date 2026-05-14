@@ -75,6 +75,10 @@ namespace Mesen
 				return TestRunner.Run(args);
 			}
 
+			if(CommandLineHelper.IsRpcServer(args)) {
+				return RpcServer.Run(args);
+			}
+
 			using SingleInstance instance = SingleInstance.Instance;
 			instance.Init(args);
 			if(instance.FirstInstance) {

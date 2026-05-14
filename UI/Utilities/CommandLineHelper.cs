@@ -29,6 +29,7 @@ public class CommandLineHelper
 	public bool LoadLastSessionRequested { get; private set; }
 	public string? MovieToRecord { get; private set; } = null;
 	public int TestRunnerTimeout { get; private set; } = 100;
+	public int RpcServerPort { get; private set; } = 0;
 	public List<string> LuaScriptsToLoad { get; private set; } = new();
 	public List<string> FilesToLoad { get; private set; } = new();
 
@@ -91,6 +92,15 @@ public class CommandLineHelper
 							if(int.TryParse(values[1], out int timeout)) {
 								TestRunnerTimeout = timeout;
 							}
+						} else if(switchArg.StartsWith("rpc-server=")) {
+							string[] values = switchArg.Split('=');
+							if(values.Length <= 1) {
+								//invalid
+								continue;
+							}
+							if(int.TryParse(values[1], out int port) && port > 0 && port < 65536) {
+								RpcServerPort = port;
+							}
 						} else {
 							if(!ConfigManager.ProcessSwitch(switchArg)) {
 								_errorMessages.Add(ResourceHelper.GetMessage("InvalidArgument", arg));
@@ -126,6 +136,11 @@ public class CommandLineHelper
 	public static bool IsTestRunner(string[] args)
 	{
 		return args.Any(arg => CommandLineHelper.ConvertArg(arg).ToLowerInvariant() == "testrunner");
+	}
+
+	public static bool IsRpcServer(string[] args)
+	{
+		return args.Any(arg => CommandLineHelper.ConvertArg(arg).ToLowerInvariant().StartsWith("rpc-server="));
 	}
 
 	public void ProcessPostLoadCommandSwitches(MainWindow wnd)
