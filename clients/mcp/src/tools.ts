@@ -208,6 +208,63 @@ export const TOOLS: ToolDef[] = [
       optNum(a.maxResults, "maxResults", 10),
     ),
   },
+  {
+    name: "snes_mem_write_byte",
+    description: "Write 1 byte to a memory space. Bypasses CPU memory protection (routes via Debugger MemoryDumper). Same space names as snes_mem_read_byte.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        space: { type: "string" },
+        addr: { type: "integer" },
+        value: { type: "integer", minimum: 0, maximum: 255 },
+      },
+      required: ["space", "addr", "value"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.mem.writeByte(
+      asStr(a.space, "space") as never,
+      asNum(a.addr, "addr"),
+      asNum(a.value, "value"),
+    ),
+  },
+  {
+    name: "snes_mem_write_word",
+    description: "Write 2 bytes little-endian (symmetric with snes_mem_read_word).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        space: { type: "string" },
+        addr: { type: "integer" },
+        value: { type: "integer", minimum: 0, maximum: 65535 },
+      },
+      required: ["space", "addr", "value"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.mem.writeWord(
+      asStr(a.space, "space") as never,
+      asNum(a.addr, "addr"),
+      asNum(a.value, "value"),
+    ),
+  },
+  {
+    name: "snes_mem_write_range",
+    description: "Write up to 256 bytes from a hex string (no separator). Symmetric with snes_mem_read_range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        space: { type: "string" },
+        addr: { type: "integer" },
+        hex: { type: "string", description: "Even-length hex, no separator (e.g. '0102FF' for 3 bytes)" },
+      },
+      required: ["space", "addr", "hex"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.mem.writeRange(
+      asStr(a.space, "space") as never,
+      asNum(a.addr, "addr"),
+      asStr(a.hex, "hex"),
+    ),
+  },
 
   // ---------- bp ----------
   {

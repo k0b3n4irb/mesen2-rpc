@@ -206,6 +206,71 @@ namespace Mesen.Utilities
 			return Convert.ToHexString(buf);
 		}
 
+		//---------------------------------------------------------------
+		// Memory write
+		//
+		// Writes target the SAME memory spaces accepted by mem.read_*.
+		// Backed by DebugApi.SetMemoryValue(s), which routes through
+		// MemoryDumper — bypasses CPU memory protection (writes to ROM
+		// patch the in-memory image; the .sfc file on disk is untouched).
+		// Useful for: injecting input state into pad_keys, skipping a
+		// title screen by overwriting game_state, patching a flag mid-run
+		// to exercise an else branch.
+		//---------------------------------------------------------------
+
+		[JsonRpcMethod("mem.write_byte")]
+		public bool MemWriteByte(string space, uint addr, byte value)
+		{
+			MemoryType type = ParseMemorySpace(space);
+			DebugApi.SetMemoryValue(type, addr, value);
+			return true;
+		}
+
+		[JsonRpcMethod("mem.write_word")]
+		public bool MemWriteWord(string space, uint addr, uint value)
+		{
+			//Little-endian: low byte at addr, high byte at addr+1.
+			//Matches mem.read_word's decoding so the round-trip is
+			//symmetric. Truncates to 16 bits silently.
+			MemoryType type = ParseMemorySpace(space);
+			DebugApi.SetMemoryValue(type, addr, (byte)(value & 0xFF));
+			DebugApi.SetMemoryValue(type, addr + 1, (byte)((value >> 8) & 0xFF));
+			return true;
+		}
+
+		[JsonRpcMethod("mem.write_range")]
+		public bool MemWriteRange(string space, uint addr, string hex)
+		{
+			//`hex` is a compact (no separator) lower- or upper-case hex
+			//string. Symmetric with mem.read_range's output format, so
+			//`mem.write_range(s, a, mem.read_range(s, a, n))` is a no-op.
+			//Capped at the same 256 bytes per call for the same token
+			//discipline reason.
+			const int maxPerCall = 256;
+			if(hex.Length % 2 != 0) {
+				throw new LocalRpcException(
+					$"mem.write_range: hex length must be even (got {hex.Length})")
+					{ ErrorCode = -32602 };
+			}
+			int n = hex.Length / 2;
+			if(n == 0 || n > maxPerCall) {
+				throw new LocalRpcException(
+					$"mem.write_range: byte count must be 1..{maxPerCall} (got {n})")
+					{ ErrorCode = -32602 };
+			}
+			byte[] data;
+			try {
+				data = Convert.FromHexString(hex);
+			} catch(FormatException ex) {
+				throw new LocalRpcException(
+					$"mem.write_range: invalid hex string ({ex.Message})")
+					{ ErrorCode = -32602 };
+			}
+			MemoryType type = ParseMemorySpace(space);
+			DebugApi.SetMemoryValues(type, addr, data, data.Length);
+			return true;
+		}
+
 		[JsonRpcMethod("emu.load_rom")]
 		public bool EmuLoadRom(string path)
 		{

@@ -109,6 +109,22 @@ export class Mesen2Client {
       maxResults = 10,
     ): Promise<number[]> =>
       this.transport.call("mem.search", [space, patternHex, startAddr, length, maxResults]),
+
+    /** Write one byte. Bypasses CPU memory protection (routes via Debugger MemoryDumper). */
+    writeByte: (space: MemorySpace, addr: number, value: number): Promise<boolean> =>
+      this.transport.call("mem.write_byte", [space, addr, value]),
+
+    /** Write 2 bytes little-endian (symmetric with readWord). */
+    writeWord: (space: MemorySpace, addr: number, value: number): Promise<boolean> =>
+      this.transport.call("mem.write_word", [space, addr, value]),
+
+    /**
+     * Write up to 256 bytes from a hex string (no separator). Symmetric
+     * with readRange — `writeRange(s, a, await readRange(s, a, n))` is a
+     * no-op. Server throws on odd-length hex or n > 256.
+     */
+    writeRange: (space: MemorySpace, addr: number, hex: string): Promise<boolean> =>
+      this.transport.call("mem.write_range", [space, addr, hex]),
   };
 
   // ------------------------------------------------------------------
