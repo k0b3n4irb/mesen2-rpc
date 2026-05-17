@@ -171,4 +171,23 @@ export class Mesen2Client {
     at: (addr: number, n = 10): Promise<DisasmRow[]> =>
       this.transport.call("disasm.at", [addr, n]),
   };
+
+  // ------------------------------------------------------------------
+  // input.*
+  // ------------------------------------------------------------------
+
+  readonly input = {
+    /**
+     * Override controller `port` (0..7) to hold the buttons in the mask.
+     * Layout matches the SNES joypad register ($4218 hi-byte + $4219
+     * lo-byte) and OpenSNES KEY_* constants:
+     *   B=0x8000  Y=0x4000  SELECT=0x2000  START=0x1000
+     *   UP=0x0800 DOWN=0x0400 LEFT=0x0200   RIGHT=0x0100
+     *   A=0x0080  X=0x0040  L=0x0020       R=0x0010
+     * Pass `buttons=0` to release all. Persists until next set; cleared
+     * on emu.load_rom.
+     */
+    set: (port: number, buttons: number): Promise<boolean> =>
+      this.transport.call("input.set", [port, buttons]),
+  };
 }

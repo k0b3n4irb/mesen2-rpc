@@ -328,4 +328,20 @@ export const TOOLS: ToolDef[] = [
     },
     handler: (c, a) => c.disasm.at(asNum(a.addr, "addr"), optNum(a.n, "n", 10)),
   },
+
+  // ---------- input ----------
+  {
+    name: "snes_input_set",
+    description: "Override controller `port` (0..7) to hold buttons in `buttons` mask (matches SNES joypad register: B=$8000 Y=$4000 SELECT=$2000 START=$1000 UP=$0800 DOWN=$0400 LEFT=$0200 RIGHT=$0100 A=$80 X=$40 L=$20 R=$10). Pass 0 to release. Persists until next call; cleared on load_rom.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        port: { type: "integer", minimum: 0, maximum: 7 },
+        buttons: { type: "integer", minimum: 0, maximum: 0xFFFF },
+      },
+      required: ["port", "buttons"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.input.set(asNum(a.port, "port"), asNum(a.buttons, "buttons")),
+  },
 ];

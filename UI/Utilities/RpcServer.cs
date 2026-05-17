@@ -787,6 +787,46 @@ namespace Mesen.Utilities
 		}
 
 		//---------------------------------------------------------------
+		// Input
+		//---------------------------------------------------------------
+
+		[JsonRpcMethod("input.set")]
+		public bool InputSet(uint port, uint buttons)
+		{
+			//Override controller `port` (0..7) to hold the buttons named in
+			//the bitmask `buttons`. The mask layout matches the SNES joypad
+			//read register ($4218 hi-byte + $4219 lo-byte), so OpenSNES
+			//`KEY_*` constants map directly:
+			//  $8000=B  $4000=Y  $2000=SELECT $1000=START
+			//  $0800=UP $0400=DOWN $0200=LEFT $0100=RIGHT
+			//  $0080=A  $0040=X  $0020=L      $0010=R
+			//Pass `buttons=0` to release all buttons.
+			//
+			//Persists until the next input.set call for the same port.
+			//Survives reset; cleared on emu.load_rom (Debugger reinit).
+			if(port >= 8) {
+				throw new LocalRpcException($"port={port} out of range (0..7)")
+					{ ErrorCode = -32602 };
+			}
+			DebugControllerState state = new DebugControllerState {
+				B      = (buttons & 0x8000) != 0,
+				Y      = (buttons & 0x4000) != 0,
+				Select = (buttons & 0x2000) != 0,
+				Start  = (buttons & 0x1000) != 0,
+				Up     = (buttons & 0x0800) != 0,
+				Down   = (buttons & 0x0400) != 0,
+				Left   = (buttons & 0x0200) != 0,
+				Right  = (buttons & 0x0100) != 0,
+				A      = (buttons & 0x0080) != 0,
+				X      = (buttons & 0x0040) != 0,
+				L      = (buttons & 0x0020) != 0,
+				R      = (buttons & 0x0010) != 0,
+			};
+			DebugApi.SetInputOverrides(port, state);
+			return true;
+		}
+
+		//---------------------------------------------------------------
 		// Helpers
 		//---------------------------------------------------------------
 
