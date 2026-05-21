@@ -1717,4 +1717,27 @@ namespace Mesen.Interop
 		[MarshalAs(UnmanagedType.I1)] public bool Select;
 		[MarshalAs(UnmanagedType.I1)] public bool Start;
 	}
+
+	//Alt-controller override state. Separate from DebugControllerState
+	//to avoid changing the cross-console struct layout. Added 2026-05-21
+	//for OpenSNES mouse/scope positive-path probes via mesen2-rpc.
+	public struct DebugMouseOverride
+	{
+		[MarshalAs(UnmanagedType.I1)] public bool Enabled;
+		public short Dx;
+		public short Dy;
+		[MarshalAs(UnmanagedType.I1)] public bool Left;
+		[MarshalAs(UnmanagedType.I1)] public bool Right;
+	}
+
+	public struct DebugScopeOverride
+	{
+		[MarshalAs(UnmanagedType.I1)] public bool Enabled;
+		public short X;
+		public short Y;
+		[MarshalAs(UnmanagedType.I1)] public bool Fire;
+		[MarshalAs(UnmanagedType.I1)] public bool Cursor;
+		[MarshalAs(UnmanagedType.I1)] public bool Turbo;
+		[MarshalAs(UnmanagedType.I1)] public bool Pause;
+	}
 }

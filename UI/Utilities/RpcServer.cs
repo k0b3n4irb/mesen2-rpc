@@ -891,6 +891,66 @@ namespace Mesen.Utilities
 			return true;
 		}
 
+		[JsonRpcMethod("input.set_mouse")]
+		public bool InputSetMouse(uint port, int dx, int dy, bool left, bool right)
+		{
+			//Reserved for the positive-path alt-controller surface (see
+			//chantier note mesen2_rpc_input_mem_probes.md). The C++ side
+			//backing (SetMouseOverride DllExport + SnesDebugger dispatch)
+			//was prototyped but caused heap corruption — disabled pending
+			//further investigation. Calling this method returns an error
+			//so probes fail loudly instead of silently dropping input.
+			throw new LocalRpcException(
+				"input.set_mouse: positive-path alt-controller support is " +
+				"not yet implemented (the C++ dispatch caused heap corruption; " +
+				"see Mesen2 commit history). Use the no-controller probe path " +
+				"in the meantime."
+			) { ErrorCode = -32601 };
+		}
+
+		[JsonRpcMethod("input.set_scope")]
+		public bool InputSetScope(uint port, int x, int y, bool fire, bool cursor, bool turbo, bool pause)
+		{
+			throw new LocalRpcException(
+				"input.set_scope: positive-path alt-controller support is " +
+				"not yet implemented (see input.set_mouse for context)."
+			) { ErrorCode = -32601 };
+		}
+
+		[JsonRpcMethod("controller.connect")]
+		public bool ControllerConnect(uint port, string type)
+		{
+			//Hot-swap the controller type on `port` (0 = Port1, 1 = Port2).
+			//Mutates the in-memory SnesConfig and refreshes the C++ device
+			//list without a full PowerCycle.
+			//
+			//Accepted types: "controller" (standard SNES pad), "mouse"
+			//(SnesMouse), "scope" (SuperScope), "none" (disconnect).
+			//
+			//After switching, drive state via `input.set` (controller),
+			//`input.set_mouse` (mouse), or `input.set_scope` (scope).
+			//Existing overrides on the port are NOT cleared by the swap —
+			//caller should re-set the appropriate override.
+			if(port > 1) {
+				throw new LocalRpcException($"port={port} out of range (0..1)")
+					{ ErrorCode = -32602 };
+			}
+			ControllerType ct = type.ToLowerInvariant() switch {
+				"controller" or "joypad" or "snescontroller" => ControllerType.SnesController,
+				"mouse" or "snesmouse" => ControllerType.SnesMouse,
+				"scope" or "superscope" or "lightgun" => ControllerType.SuperScope,
+				"none" or "disconnect" => ControllerType.None,
+				_ => throw new LocalRpcException($"unknown controller type '{type}' " +
+					$"(expected: controller, mouse, scope, none)") { ErrorCode = -32602 }
+			};
+			SnesConfig cfg = ConfigManager.Config.Snes;
+			if(port == 0) cfg.Port1.Type = ct;
+			else cfg.Port2.Type = ct;
+			cfg.ApplyConfig();
+			ConfigApi.RefreshControlDevices();
+			return true;
+		}
+
 		//---------------------------------------------------------------
 		// Helpers
 		//---------------------------------------------------------------

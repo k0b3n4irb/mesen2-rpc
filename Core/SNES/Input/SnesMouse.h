@@ -53,6 +53,11 @@ public:
 		_settings = _emu->GetSettings();
 	}
 
+	//Public wrapper for the protected base SetMovement — used by
+	//SnesDebugger::ProcessInputOverrides to drive mouse deltas from the
+	//mesen2-rpc input.set_mouse method.
+	void SetMovementFromOverride(MouseMovement mov) { SetMovement(mov); }
+
 	void WriteRam(uint16_t addr, uint8_t value) override
 	{
 		StrobeProcessWrite(value);

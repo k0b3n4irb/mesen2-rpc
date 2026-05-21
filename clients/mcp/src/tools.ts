@@ -39,6 +39,12 @@ function optNum(v: unknown, name: string, fallback: number): number {
   if (v === undefined || v === null) return fallback;
   return asNum(v, name);
 }
+function asBool(v: unknown, name: string): boolean {
+  if (typeof v !== "boolean") {
+    throw new Error(`${name} must be a boolean, got ${typeof v}`);
+  }
+  return v;
+}
 
 export const TOOLS: ToolDef[] = [
   // ---------- emu ----------
@@ -400,5 +406,72 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     handler: (c, a) => c.input.set(asNum(a.port, "port"), asNum(a.buttons, "buttons")),
+  },
+  {
+    name: "snes_input_set_mouse",
+    description: "Override the SnesMouse on `port` (0..7) with per-frame displacement (dx, dy in pixels, -127..127 useful) and L/R button state. Port must currently host a SnesMouse — call snes_controller_connect with type='mouse' first. Pass dx=0 dy=0 left=false right=false to neutralise.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        port: { type: "integer", minimum: 0, maximum: 7 },
+        dx: { type: "integer", minimum: -32768, maximum: 32767 },
+        dy: { type: "integer", minimum: -32768, maximum: 32767 },
+        left: { type: "boolean" },
+        right: { type: "boolean" },
+      },
+      required: ["port", "dx", "dy", "left", "right"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.input.setMouse(
+      asNum(a.port, "port"),
+      asNum(a.dx, "dx"),
+      asNum(a.dy, "dy"),
+      asBool(a.left, "left"),
+      asBool(a.right, "right"),
+    ),
+  },
+  {
+    name: "snes_input_set_scope",
+    description: "Override the SuperScope on `port` (0..7) with absolute screen coordinates (x in 0..255, y in 0..223 NTSC visible) and the four scope buttons. Fire/cursor + valid coords triggers PPU H/V latch. Pass x=-1 or y=-1 for off-screen. Port must currently host a SuperScope — call snes_controller_connect with type='scope' first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        port: { type: "integer", minimum: 0, maximum: 7 },
+        x: { type: "integer", minimum: -32768, maximum: 32767 },
+        y: { type: "integer", minimum: -32768, maximum: 32767 },
+        fire: { type: "boolean" },
+        cursor: { type: "boolean" },
+        turbo: { type: "boolean" },
+        pause: { type: "boolean" },
+      },
+      required: ["port", "x", "y", "fire", "cursor", "turbo", "pause"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.input.setScope(
+      asNum(a.port, "port"),
+      asNum(a.x, "x"),
+      asNum(a.y, "y"),
+      asBool(a.fire, "fire"),
+      asBool(a.cursor, "cursor"),
+      asBool(a.turbo, "turbo"),
+      asBool(a.pause, "pause"),
+    ),
+  },
+  {
+    name: "snes_controller_connect",
+    description: "Hot-swap the controller type on `port` (0=Port1, 1=Port2). Types: 'controller' (standard SNES pad), 'mouse' (SnesMouse), 'scope' (SuperScope), 'none' (disconnect). Use this before snes_input_set_mouse / snes_input_set_scope to make the device available on the port.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        port: { type: "integer", minimum: 0, maximum: 1 },
+        type: { type: "string", enum: ["controller", "mouse", "scope", "none"] },
+      },
+      required: ["port", "type"],
+      additionalProperties: false,
+    },
+    handler: (c, a) => c.controller.connect(
+      asNum(a.port, "port"),
+      asStr(a.type, "type") as "controller" | "mouse" | "scope" | "none",
+    ),
   },
 ];

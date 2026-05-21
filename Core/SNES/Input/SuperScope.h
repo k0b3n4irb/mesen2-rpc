@@ -7,8 +7,10 @@
 
 class SuperScope : public BaseControlDevice
 {
-private:
+public:
 	enum Buttons { Fire = 0, Cursor = 1, Turbo = 2, Pause = 3 };
+
+private:
 	uint32_t _stateBuffer = 0;
 	bool _prevFireButton = false;
 	bool _prevTurboButton = false;
@@ -97,6 +99,12 @@ public:
 	{
 		_ppu = console->GetPpu();
 	}
+
+	//Public re-entry into the protected OnAfterSetState — used by
+	//SnesDebugger::ProcessInputOverrides to re-trigger the PPU H/V
+	//latch after an input.set_scope override applies. Without this,
+	//fire+coords latch only on the NEXT frame.
+	void TriggerLatchAfterOverride() { OnAfterSetState(); }
 
 	uint8_t ReadRam(uint16_t addr) override
 	{

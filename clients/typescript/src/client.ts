@@ -205,5 +205,55 @@ export class Mesen2Client {
      */
     set: (port: number, buttons: number): Promise<boolean> =>
       this.transport.call("input.set", [port, buttons]),
+
+    /**
+     * Override the SnesMouse on `port` with per-frame displacement and
+     * button state. The port must currently host a SnesMouse device —
+     * call `controller.connect(port, "mouse")` first to switch.
+     * Persists until cleared; pass dx=0 dy=0 left=false right=false to
+     * neutralise.
+     */
+    setMouse: (
+      port: number,
+      dx: number,
+      dy: number,
+      left: boolean,
+      right: boolean,
+    ): Promise<boolean> =>
+      this.transport.call("input.set_mouse", [port, dx, dy, left, right]),
+
+    /**
+     * Override the SuperScope on `port` with absolute screen coordinates
+     * (x in 0..255, y in 0..223 NTSC visible) and the four scope buttons.
+     * Fire/cursor with valid coords triggers the PPU H/V latch on the
+     * next frame. Pass x=-1 or y=-1 to signal off-screen (sets bit 0x40).
+     * The port must currently host a SuperScope device — call
+     * `controller.connect(port, "scope")` first to switch.
+     */
+    setScope: (
+      port: number,
+      x: number,
+      y: number,
+      fire: boolean,
+      cursor: boolean,
+      turbo: boolean,
+      pause: boolean,
+    ): Promise<boolean> =>
+      this.transport.call("input.set_scope", [port, x, y, fire, cursor, turbo, pause]),
+  };
+
+  // ------------------------------------------------------------------
+  // controller.*
+  // ------------------------------------------------------------------
+
+  readonly controller = {
+    /**
+     * Hot-swap the controller type on `port` (0 = Port1, 1 = Port2).
+     * Types: "controller" (standard SNES pad), "mouse" (SnesMouse),
+     * "scope" (SuperScope), "none" (disconnect). After switching, drive
+     * state via input.set / input.setMouse / input.setScope.
+     */
+    connect: (port: number, type: "controller" | "mouse" | "scope" | "none"): Promise<boolean> =>
+      this.transport.call("controller.connect", [port, type]),
   };
 }

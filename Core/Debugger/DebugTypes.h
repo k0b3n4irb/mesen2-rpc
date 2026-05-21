@@ -545,3 +545,27 @@ struct DebugControllerState
 		return A || B || X || Y || L || R || U || D || Up || Down || Left || Right || Select || Start;
 	}
 };
+
+//Alt-controller override state (mouse, light-gun). Kept separate from
+//DebugControllerState to avoid disturbing the existing cross-console
+//struct layout (the joypad struct is shared with NES/GBA/etc.).
+//Added 2026-05-21 for OpenSNES mouse/scope positive-path probes.
+struct DebugMouseOverride
+{
+	bool Enabled;
+	int16_t Dx;
+	int16_t Dy;
+	bool Left;
+	bool Right;
+};
+
+struct DebugScopeOverride
+{
+	bool Enabled;
+	int16_t X;
+	int16_t Y;
+	bool Fire;
+	bool Cursor;
+	bool Turbo;
+	bool Pause;
+};

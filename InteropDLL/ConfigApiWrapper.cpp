@@ -1,6 +1,7 @@
 #include "Common.h"
 #include "Core/Shared/Emulator.h"
 #include "Core/Shared/Interfaces/IAudioDevice.h"
+#include "Core/Shared/Interfaces/IConsole.h"
 #include "Core/Shared/BaseControlManager.h"
 #include "Core/Shared/BaseControlDevice.h"
 #include "Core/Shared/EmuSettings.h"
@@ -11,6 +12,20 @@ extern unique_ptr<Emulator> _emu;
 extern unique_ptr<IAudioDevice> _soundManager;
 
 extern "C" {
+	DllExport void __stdcall RefreshControlDevices()
+	{
+		//Forces the running console's BaseControlManager to re-check its
+		//SnesConfig::Port1/Port2 types and rebuild its device list. Used
+		//by the OpenSNES mesen2-rpc workflow to switch port types at
+		//runtime (e.g. plug SnesMouse on port 1 to drive the mouse
+		//example) without a full PowerCycle.
+		shared_ptr<IConsole> console = _emu->GetConsole();
+		if(console) {
+			console->GetControlManager()->UpdateControlDevices();
+		}
+	}
+
+
 	DllExport void __stdcall SetVideoConfig(VideoConfig config)
 	{
 		_emu->GetSettings()->SetVideoConfig(config);
