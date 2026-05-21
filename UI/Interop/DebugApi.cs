@@ -226,6 +226,8 @@ namespace Mesen.Interop
 		[DllImport(DllPath)] public static extern void SetBreakpoints([MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] InteropBreakpoint[] breakpoints, UInt32 length);
 		
 		[DllImport(DllPath)] public static extern void SetInputOverrides(UInt32 index, DebugControllerState state);
+		[DllImport(DllPath)] public static extern void SetMouseOverride(UInt32 index, DebugMouseOverride state);
+		[DllImport(DllPath)] public static extern void SetScopeOverride(UInt32 index, DebugScopeOverride state);
 		[DllImport(DllPath)] private static extern void GetAvailableInputOverrides([In, Out] byte[] availableIndexes);
 		
 		public static List<int> GetAvailableInputOverrides()

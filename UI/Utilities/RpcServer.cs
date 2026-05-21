@@ -894,27 +894,49 @@ namespace Mesen.Utilities
 		[JsonRpcMethod("input.set_mouse")]
 		public bool InputSetMouse(uint port, int dx, int dy, bool left, bool right)
 		{
-			//Reserved for the positive-path alt-controller surface (see
-			//chantier note mesen2_rpc_input_mem_probes.md). The C++ side
-			//backing (SetMouseOverride DllExport + SnesDebugger dispatch)
-			//was prototyped but caused heap corruption — disabled pending
-			//further investigation. Calling this method returns an error
-			//so probes fail loudly instead of silently dropping input.
-			throw new LocalRpcException(
-				"input.set_mouse: positive-path alt-controller support is " +
-				"not yet implemented (the C++ dispatch caused heap corruption; " +
-				"see Mesen2 commit history). Use the no-controller probe path " +
-				"in the meantime."
-			) { ErrorCode = -32601 };
+			//Override the SnesMouse on `port` with per-frame displacement
+			//and button state. Port must currently host a SnesMouse —
+			//call `controller.connect(port, "mouse")` first if needed.
+			//Persists across frames; SnesMouse drains the movement
+			//each strobe-poll cycle (one-shot per cycle).
+			if(port >= 8) {
+				throw new LocalRpcException($"port={port} out of range (0..7)")
+					{ ErrorCode = -32602 };
+			}
+			DebugMouseOverride state = new DebugMouseOverride {
+				Enabled = true,
+				Dx = (short)dx,
+				Dy = (short)dy,
+				Left = left,
+				Right = right,
+			};
+			DebugApi.SetMouseOverride(port, state);
+			return true;
 		}
 
 		[JsonRpcMethod("input.set_scope")]
 		public bool InputSetScope(uint port, int x, int y, bool fire, bool cursor, bool turbo, bool pause)
 		{
-			throw new LocalRpcException(
-				"input.set_scope: positive-path alt-controller support is " +
-				"not yet implemented (see input.set_mouse for context)."
-			) { ErrorCode = -32601 };
+			//Override the SuperScope on `port` with absolute screen
+			//coordinates (x in 0..255, y in 0..223 NTSC visible) plus the
+			//four scope buttons. Fire/cursor with valid coords triggers
+			//the PPU H/V latch (re-call of OnAfterSetState). Use x=-1 or
+			//y=-1 to signal off-screen (bit 0x40 in the scope byte).
+			if(port >= 8) {
+				throw new LocalRpcException($"port={port} out of range (0..7)")
+					{ ErrorCode = -32602 };
+			}
+			DebugScopeOverride state = new DebugScopeOverride {
+				Enabled = true,
+				X = (short)x,
+				Y = (short)y,
+				Fire = fire,
+				Cursor = cursor,
+				Turbo = turbo,
+				Pause = pause,
+			};
+			DebugApi.SetScopeOverride(port, state);
+			return true;
 		}
 
 		[JsonRpcMethod("controller.connect")]

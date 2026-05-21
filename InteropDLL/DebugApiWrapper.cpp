@@ -88,6 +88,8 @@ extern "C"
 	DllExport void __stdcall SetBreakpoints(Breakpoint breakpoints[], uint32_t length) { WithDebugger(void, SetBreakpoints(breakpoints, length)); }
 	
 	DllExport void __stdcall SetInputOverrides(uint32_t index, DebugControllerState state) { WithDebugger(void, SetInputOverrides(index, state)); }
+	DllExport void __stdcall SetMouseOverride(uint32_t index, DebugMouseOverride state) { WithDebugger(void, SetMouseOverride(index, state)); }
+	DllExport void __stdcall SetScopeOverride(uint32_t index, DebugScopeOverride state) { WithDebugger(void, SetScopeOverride(index, state)); }
 	DllExport void __stdcall GetAvailableInputOverrides(uint8_t* availableIndexes) { WithDebugger(void, GetAvailableInputOverrides(availableIndexes)); }
 	
 	DllExport void __stdcall GetTokenList(CpuType cpuType, char* tokenList) { WithDebugger(void, GetTokenList(cpuType, tokenList)); }

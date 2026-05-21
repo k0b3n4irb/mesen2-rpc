@@ -171,6 +171,10 @@ public:
 	void SetBreakpoints(Breakpoint breakpoints[], uint32_t length);
 
 	void SetInputOverrides(uint32_t index, DebugControllerState state);
+	void SetMouseOverride(uint32_t index, DebugMouseOverride state);
+	void SetScopeOverride(uint32_t index, DebugScopeOverride state);
+	DebugMouseOverride GetMouseOverride(uint32_t index);
+	DebugScopeOverride GetScopeOverride(uint32_t index);
 	void GetAvailableInputOverrides(uint8_t* availableIndexes);
 	
 	void Log(string message);

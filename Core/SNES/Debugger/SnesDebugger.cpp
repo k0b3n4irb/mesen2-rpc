@@ -601,13 +601,33 @@ void SnesDebugger::ProcessInputOverrides(DebugControllerState inputOverrides[8])
 				controller->SetBitValue(SnesController::Buttons::Left, inputOverrides[i].Left);
 				controller->SetBitValue(SnesController::Buttons::Right, inputOverrides[i].Right);
 			}
+		} else if(auto mouse = std::dynamic_pointer_cast<SnesMouse>(device)) {
+			DebugMouseOverride m = _debugger->GetMouseOverride(i);
+			if(m.Enabled) {
+				MouseMovement mov;
+				mov.dx = m.Dx;
+				mov.dy = m.Dy;
+				mouse->SetMovementFromOverride(mov);
+				mouse->SetBitValue(SnesMouse::Buttons::Left, m.Left);
+				mouse->SetBitValue(SnesMouse::Buttons::Right, m.Right);
+			}
+		} else if(auto scope = std::dynamic_pointer_cast<SuperScope>(device)) {
+			DebugScopeOverride s = _debugger->GetScopeOverride(i);
+			if(s.Enabled) {
+				MousePosition pos;
+				pos.X = s.X;
+				pos.Y = s.Y;
+				scope->SetCoordinates(pos);
+				scope->SetBitValue(SuperScope::Buttons::Fire, s.Fire);
+				scope->SetBitValue(SuperScope::Buttons::Cursor, s.Cursor);
+				scope->SetBitValue(SuperScope::Buttons::Turbo, s.Turbo);
+				scope->SetBitValue(SuperScope::Buttons::Pause, s.Pause);
+				//Re-trigger the PPU H/V latch — UpdateInputState ran
+				//OnAfterSetState BEFORE our override applied. Without
+				//this re-call, fire+coords latch only on the NEXT frame.
+				scope->TriggerLatchAfterOverride();
+			}
 		}
-		//Mouse/scope override dispatch temporarily disabled — caused
-		//heap corruption (`free(): invalid pointer`) at runtime. The
-		//C++/C# struct passing for DebugMouseOverride/DebugScopeOverride
-		//needs further investigation. The structs and DllExports are in
-		//place; only the SnesDebugger dispatch is commented out so the
-		//joypad path continues to work.
 	}
 	controlManager->RefreshHubState();
 }

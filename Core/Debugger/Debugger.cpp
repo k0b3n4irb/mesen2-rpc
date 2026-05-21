@@ -1036,6 +1036,33 @@ void Debugger::SetInputOverrides(uint32_t index, DebugControllerState state)
 	_inputOverrides[index] = state;
 }
 
+//Static singletons for alt-controller overrides — keeps the Debugger
+//class layout unchanged (which avoided heap corruption observed when
+//members were added directly to the class). Single emulator instance
+//at a time, so single-table is fine.
+static DebugMouseOverride g_mouseOverrides[8] = {};
+static DebugScopeOverride g_scopeOverrides[8] = {};
+
+void Debugger::SetMouseOverride(uint32_t index, DebugMouseOverride state)
+{
+	if(index < 8) g_mouseOverrides[index] = state;
+}
+
+void Debugger::SetScopeOverride(uint32_t index, DebugScopeOverride state)
+{
+	if(index < 8) g_scopeOverrides[index] = state;
+}
+
+DebugMouseOverride Debugger::GetMouseOverride(uint32_t index)
+{
+	return index < 8 ? g_mouseOverrides[index] : DebugMouseOverride{};
+}
+
+DebugScopeOverride Debugger::GetScopeOverride(uint32_t index)
+{
+	return index < 8 ? g_scopeOverrides[index] : DebugScopeOverride{};
+}
+
 void Debugger::GetAvailableInputOverrides(uint8_t* availableIndexes)
 {
 	BaseControlManager* controlManager = _console->GetControlManager();
